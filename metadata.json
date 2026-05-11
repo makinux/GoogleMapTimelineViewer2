@@ -1,0 +1,6 @@
+{
+  "name": "Map Timeline Visualizer",
+  "description": "Visualize your Google Maps Location History JSON export with date filtering and distance statistics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
