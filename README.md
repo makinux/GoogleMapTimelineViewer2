@@ -5,6 +5,13 @@ If, like me, you want to view years' worth of timeline data, this project makes 
 
 Note that since it uses OpenStreetMap as the base map instead of Google Maps, no API key is required.
 
+## Exporting Data from Your Device
+For Android: Open the Settings app, tap "Location," "Location Services," then "Timeline," and then tap "Export Timeline Data."
+For iOS: Open the Google Maps app, tap your profile picture, select "Settings," and then tap "Location & Privacy." Tap "Export Timeline Data."
+
+Save the exported file as "Timeline.json." 
+Transfer the JSON file to your computer and save it to your preferred location.
+
 ## Run Locally
 
 **Prerequisites:**  Node.js
