@@ -1,12 +1,9 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+## GoogleMapTimelineViewer
+In 2024, Google announced that it would store timeline data (such as location history) locally on the device itself, rather than in a cloud-based system. Because the data is now stored on the device, the desktop version of the timeline viewer was discontinued.
 
-# Run and deploy your AI Studio app
+If, like me, you want to view years' worth of timeline data, this project makes that possible.
 
-This contains everything you need to run your app locally.
-
-View your app in AI Studio: https://ai.studio/apps/75c8f345-21e4-4d96-8852-a6d903a3fe55
+Note that since it uses OpenStreetMap as the base map instead of Google Maps, no API key is required.
 
 ## Run Locally
 
