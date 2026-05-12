@@ -8,6 +8,8 @@ If, like me, you want to view years' worth of timeline data, this project makes 
 
 Note that since it uses OpenStreetMap as the base map instead of Google Maps, no API key is required and Serverless.
 
+DEMO:https://makinux.github.io/GoogleMapTimelineViewer2/
+
 ## Fature
 ・Time Filter
 
