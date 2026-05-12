@@ -10,9 +10,13 @@ Note that since it uses OpenStreetMap as the base map instead of Google Maps, no
 
 ## Fature
 ・Time Filter
+
 ・Time Slider Animation
+
 ・Photo Cluster View
+
 ・None API & Serverless
+
 ・Very fast & Ultra Lite
 
 ## Exporting Data from Your Device
