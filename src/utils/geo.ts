@@ -186,16 +186,36 @@ export function calculateTotalDistance(points: LocationPoint[]): number {
 }
 
 /**
- * Calculates average speed for a sequence of points
+ * Calculates average speed for a sequence of points (Moving Average)
  */
 export function calculateAverageSpeed(points: LocationPoint[]): number {
   if (points.length < 2) return 0;
   
-  const totalDist = calculateTotalDistance(points);
-  const startTime = points[0].timestamp.getTime();
-  const endTime = points[points.length - 1].timestamp.getTime();
-  const totalTimeHours = (endTime - startTime) / (1000 * 60 * 60);
+  let movingDist = 0;
+  let movingTimeMs = 0;
 
-  if (totalTimeHours <= 0) return 0;
-  return totalDist / totalTimeHours;
+  for (let i = 0; i < points.length - 1; i++) {
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    
+    const dist = getDistanceKm(p1.lat, p1.lng, p2.lat, p2.lng);
+    const timeMs = p2.timestamp.getTime() - p1.timestamp.getTime();
+    
+    if (timeMs > 0) {
+      const speedKmH = dist / (timeMs / (1000 * 60 * 60));
+      
+      // Heuristic: Only consider segments where speed is > 1 km/h 
+      // to exclude stationary periods, and < 1200 km/h to exclude GPS glitches.
+      // Also ensure distance is at least 5 meters to avoid jitter.
+      if (speedKmH > 1 && speedKmH < 1200 && dist > 0.005) {
+        movingDist += dist;
+        movingTimeMs += timeMs;
+      }
+    }
+  }
+
+  const movingTimeHours = movingTimeMs / (1000 * 60 * 60);
+
+  if (movingTimeHours <= 0) return 0;
+  return movingDist / movingTimeHours;
 }
