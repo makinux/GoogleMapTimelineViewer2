@@ -17,7 +17,7 @@ DEMO:https://makinux.github.io/GoogleMapTimelineViewer2/
 
 ・Photo Viewer (Optional: Cluster, Thumbnail size)
 
-・KML & KMZ Export (Optional:The KMZ file will include a thumbnail if a photo has been uploaded.)
+・Time filtered KML & KMZ Export (Optional:The KMZ file will include a thumbnail if a photo has been uploaded.)
 
 ・None API & Serverless
 
