@@ -8,6 +8,25 @@ export interface LocationPoint {
   lng: number;
   accuracy?: number;
   speedKmH?: number; // Estimated speed to next point
+  extra?: Record<string, any>;
+}
+
+export interface PhotoItem {
+  id: string;
+  url: string; // Blob URL
+  thumbnailUrl?: string; // Small thumbnail blob URL
+  filename: string;
+  creationTime?: string;
+  cameraModel?: string;
+  iso?: number;
+  aperture?: string;
+  exposureTime?: string;
+  location: {
+    latitude: number;
+    longitude: number;
+  };
+  // Optional: original file for base64 conversion
+  file?: File;
 }
 
 /**
@@ -77,6 +96,13 @@ export function parseLocationHistory(json: any): LocationPoint[] {
             lat: lat / 1e7,
             lng: lng / 1e7,
             accuracy: loc.accuracy,
+            extra: {
+              verticalAccuracy: loc.verticalAccuracy,
+              velocity: loc.velocity,
+              heading: loc.heading,
+              altitude: loc.altitude,
+              source: loc.locationSource
+            }
           });
         }
       }
@@ -92,6 +118,13 @@ export function parseLocationHistory(json: any): LocationPoint[] {
             timestamp: new Date(tsValue),
             lat: loc.latitudeE7 / 1e7,
             lng: loc.longitudeE7 / 1e7,
+            extra: {
+              placeId: loc.placeId,
+              address: loc.address,
+              name: loc.name,
+              semanticType: loc.semanticType,
+              locationSource: loc.locationSource
+            }
           });
         }
       } else if (obj.activitySegment) {
@@ -99,12 +132,18 @@ export function parseLocationHistory(json: any): LocationPoint[] {
         const end = obj.activitySegment.endLocation;
         const startTs = obj.activitySegment.duration?.startTimestamp;
         const endTs = obj.activitySegment.duration?.endTimestamp;
+        const activityExtra = {
+          activityType: obj.activitySegment.activityType,
+          confidence: obj.activitySegment.confidence,
+          distanceMeters: obj.activitySegment.distance
+        };
 
         if (start?.latitudeE7 && startTs) {
           locations.push({
             timestamp: new Date(startTs),
             lat: start.latitudeE7 / 1e7,
             lng: start.longitudeE7 / 1e7,
+            extra: { ...activityExtra, pointType: 'START' }
           });
         }
         if (end?.latitudeE7 && endTs) {
@@ -112,7 +151,22 @@ export function parseLocationHistory(json: any): LocationPoint[] {
             timestamp: new Date(endTs),
             lat: end.latitudeE7 / 1e7,
             lng: end.longitudeE7 / 1e7,
+            extra: { ...activityExtra, pointType: 'END' }
           });
+        }
+        
+        // Handle waypoints if present
+        if (Array.isArray(obj.activitySegment.waypointPath?.waypoints)) {
+          for (const wp of obj.activitySegment.waypointPath.waypoints) {
+            if (wp.latE7 && wp.lngE7) {
+              locations.push({
+                timestamp: new Date(startTs), // Waypoints usually don't have individual timestamps in this format
+                lat: wp.latE7 / 1e7,
+                lng: wp.lngE7 / 1e7,
+                extra: { ...activityExtra, pointType: 'WAYPOINT' }
+              });
+            }
+          }
         }
       }
     }
@@ -134,6 +188,7 @@ export function parseLocationHistory(json: any): LocationPoint[] {
       }
       // Handle visits (staying at a place)
       const latLngStr = segment.visit?.topCandidate?.placeLocation?.latLng;
+      const placeId = segment.visit?.topCandidate?.placeId;
       if (latLngStr) {
         const coords = parseLatLngString(latLngStr);
         const tsValue = segment.startTime || segment.endTime;
@@ -141,7 +196,8 @@ export function parseLocationHistory(json: any): LocationPoint[] {
           locations.push({
             timestamp: new Date(tsValue),
             lat: coords.lat,
-            lng: coords.lng
+            lng: coords.lng,
+            extra: placeId ? { placeId } : undefined
           });
         }
       }
@@ -218,4 +274,132 @@ export function calculateAverageSpeed(points: LocationPoint[]): number {
 
   if (movingTimeHours <= 0) return 0;
   return movingDist / movingTimeHours;
+}
+
+import JSZip from 'jszip';
+
+/**
+ * Generates a KML string from a sequence of points and photos
+ */
+export async function generateKML(
+  points: LocationPoint[], 
+  photos: PhotoItem[] = [], 
+  options: { externalImages?: boolean } = {}
+): Promise<string> {
+  const placemarks = points
+    .filter(p => p.extra?.placeId)
+    .map((p) => {
+      const timeStr = p.timestamp.toISOString();
+      const lat = p.lat;
+      const lng = p.lng;
+      const height = p.extra?.altitude || 0;
+      const placeId = p.extra?.placeId;
+
+      return `
+    <Placemark>
+      <name>placeId:${placeId}</name>
+      <description>Timestamp: ${timeStr}
+      Latitude: ${lat}
+      Longitude: ${lng}</description>
+      <Point>
+        <coordinates> ${lng}, ${lat}, ${height}</coordinates>
+      </Point>      
+    </Placemark>`;
+    }).join('');
+
+  // Process photos
+  const photoFeatures = await Promise.all(photos.map(async (photo, index) => {
+    const lat = photo.location.latitude;
+    const lng = photo.location.longitude;
+    const timeStr = photo.creationTime || '';
+    
+    let description = `Filename: ${photo.filename}\nTime: ${timeStr}`;
+    let imageHref = '';
+
+    if (options.externalImages) {
+      // Reference relative to KMZ root
+      imageHref = `images/photo_${index}.jpg`;
+      description = `<![CDATA[<img src="${imageHref}"/><br/>${description}]]>`;
+    } else {
+      try {
+        // Use thumbnailUrl if available for smaller base64 string
+        const fetchUrl = photo.thumbnailUrl || photo.url;
+        const response = await fetch(fetchUrl);
+        const blob = await response.blob();
+        imageHref = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+        description = `<![CDATA[<img src="${imageHref}"/><br/>${description}]]>`;
+      } catch (err) {
+        console.error('Failed to convert photo to base64 for KML:', err);
+      }
+    }
+
+    return `
+    <Placemark>
+      <name>${photo.filename}</name>
+      <description>${description}</description>
+      ${timeStr ? `<TimeStamp><when>${timeStr}</when></TimeStamp>` : ''}
+      <Point>
+        <coordinates>${lng},${lat},0</coordinates>
+      </Point>
+    </Placemark>`;
+  }));
+
+  const trackCoordinates = points.map(p => `${p.lng},${p.lat},0`).join(' ');
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+  <Document>
+    <name>Geo Timeline Export</name>
+    <description>Generated by Geo Timeline Voyager</description>
+    <Style id="trackStyle">
+      <LineStyle>
+        <color>ff0000ff</color>
+        <width>4</width>
+      </LineStyle>
+    </Style>
+    <Placemark>
+      <name>Track</name>
+      <styleUrl>#trackStyle</styleUrl>
+      <LineString>
+        <tessellate>1</tessellate>
+        <coordinates>${trackCoordinates}</coordinates>
+      </LineString>
+    </Placemark>
+    ${placemarks}
+    ${photoFeatures.join('')}
+  </Document>
+</kml>`;
+}
+
+/**
+ * Generates a KMZ blob from a sequence of points and photos
+ */
+export async function generateKMZ(points: LocationPoint[], photos: PhotoItem[] = []): Promise<Blob> {
+  const kml = await generateKML(points, photos, { externalImages: true });
+  const zip = new JSZip();
+  zip.file("doc.kml", kml);
+  
+  // Add images to ZIP
+  const imageFolder = zip.folder("images");
+  if (imageFolder) {
+    for (let i = 0; i < photos.length; i++) {
+      const photo = photos[i];
+      // Fetch the thumbnail blob
+      try {
+        const fetchUrl = photo.thumbnailUrl || photo.url;
+        const response = await fetch(fetchUrl);
+        const blob = await response.blob();
+        imageFolder.file(`photo_${i}.jpg`, blob);
+      } catch (err) {
+        console.error(`Failed to add photo_${i} to KMZ:`, err);
+      }
+    }
+  }
+  
+  return await zip.generateAsync({ type: "blob" });
 }

@@ -29,31 +29,27 @@ import {
   CarFront,
   Bike as BikeIcon,
   PersonStanding,
-  Zap
+  Zap,
+  Download,
+  FileCode
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import { LocationPoint, parseLocationHistory, calculateTotalDistance, calculateAverageSpeed } from './utils/geo';
+import { 
+  LocationPoint, 
+  parseLocationHistory, 
+  calculateTotalDistance, 
+  calculateAverageSpeed,
+  generateKML,
+  generateKMZ,
+  PhotoItem
+} from './utils/geo';
 import L from 'leaflet';
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import exifr from 'exifr';
 
-// Fixed PhotoItem interface for local data
-interface PhotoItem {
-  id: string;
-  url: string; // Blob URL
-  filename: string;
-  creationTime?: string;
-  cameraModel?: string;
-  iso?: number;
-  aperture?: string;
-  exposureTime?: string;
-  location: {
-    latitude: number;
-    longitude: number;
-  };
-}
+// Fixed PhotoItem interface for local data is now imported from utils/geo
 
 type VehicleType = 'walking' | 'bike' | 'motorcycle' | 'car';
 
@@ -148,11 +144,11 @@ function PolylineDisplay({ points }: { points: LocationPoint[] }) {
   return <>{segments}</>;
 }
 
-function PhotoMarker({ photo }: { photo: PhotoItem; key?: string }) {
+function PhotoMarker({ photo, activeThumbSize }: { photo: PhotoItem; activeThumbSize: number; key?: string }) {
   const customIcon = L.divIcon({
     html: `
       <div class="relative w-10 h-10 border-2 border-white rounded shadow-lg overflow-hidden bg-slate-200">
-        <img src="${photo.url}" class="w-full h-full object-cover" />
+        <img src="${photo.thumbnailUrl || photo.url}" class="w-full h-full object-cover" />
       </div>
     `,
     className: '',
@@ -164,12 +160,16 @@ function PhotoMarker({ photo }: { photo: PhotoItem; key?: string }) {
   return (
     <Marker position={[photo.location.latitude, photo.location.longitude]} icon={customIcon}>
       <Popup className="photo-popup">
-        <div className="p-1 max-w-[300px]">
-          <div className="relative aspect-video mb-2 rounded overflow-hidden bg-slate-100">
+        <div className="p-1" style={{ maxWidth: activeThumbSize + 20 }}>
+          <div 
+            className="relative mb-2 rounded overflow-hidden bg-slate-100 flex items-center justify-center"
+            style={{ width: activeThumbSize, minHeight: activeThumbSize * 0.6, maxHeight: 600 }}
+          >
             <img 
-              src={photo.url} 
+              src={photo.thumbnailUrl || photo.url} 
               alt={photo.filename} 
               className="w-full h-full object-contain cursor-pointer"
+              style={{ maxHeight: 600 }}
               onClick={() => window.open(photo.url, '_blank')}
             />
           </div>
@@ -268,7 +268,14 @@ function MapContent({
   setPlaybackSpeed,
   vehicleType,
   setVehicleType,
-  currentPosition
+  currentPosition,
+  clusterPhotos,
+  setClusterPhotos,
+  thumbnailSize,
+  setThumbnailSize,
+  customThumbnailSize,
+  setCustomThumbnailSize,
+  activeThumbSize
 }: any) {
   const minTime = filteredData.length > 0 ? filteredData[0].timestamp.getTime() : 0;
   const maxTime = filteredData.length > 0 ? filteredData[filteredData.length - 1].timestamp.getTime() : 0;
@@ -277,6 +284,39 @@ function MapContent({
   const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setCurrentTime(parseInt(e.target.value));
   };
+
+  const [exportFormat, setExportFormat] = useState<'kml' | 'kmz'>('kmz');
+
+  // Helper to jitter overlapping photos when clustering is off
+  const displayedPhotos = useMemo(() => {
+    if (clusterPhotos) return photos;
+    
+    // Group photos by exact location to apply jitter
+    const locationGroups: { [key: string]: PhotoItem[] } = {};
+    photos.forEach(p => {
+      const key = `${p.location.latitude.toFixed(6)},${p.location.longitude.toFixed(6)}`;
+      if (!locationGroups[key]) locationGroups[key] = [];
+      locationGroups[key].push(p);
+    });
+
+    return photos.map(p => {
+      const key = `${p.location.latitude.toFixed(6)},${p.location.longitude.toFixed(6)}`;
+      const group = locationGroups[key];
+      if (group.length <= 1) return p;
+
+      const idx = group.indexOf(p);
+      const angle = (idx / group.length) * Math.PI * 2;
+      const radius = 0.00005 * (1 + Math.floor(idx / 8)); // Roughly 5-10 meters jitter
+
+      return {
+        ...p,
+        location: {
+          latitude: p.location.latitude + Math.cos(angle) * radius,
+          longitude: p.location.longitude + Math.sin(angle) * radius
+        }
+      };
+    });
+  }, [photos, clusterPhotos]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-slate-50 font-sans text-slate-800">
@@ -396,6 +436,68 @@ function MapContent({
             </label>
             
             <div className="space-y-4">
+              {/* Photo Settings UI */}
+              <div className="space-y-3 p-3 bg-white border border-slate-200 rounded shadow-sm">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Clustering</label>
+                  <button 
+                    onClick={() => setClusterPhotos(!clusterPhotos)}
+                    className={cn(
+                      "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                      clusterPhotos ? "bg-blue-600" : "bg-slate-200"
+                    )}
+                  >
+                    <span 
+                      className={cn(
+                        "pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                        clusterPhotos ? "translate-x-4" : "translate-x-0"
+                      )} 
+                    />
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Thumbnail Size</label>
+                  <div className="grid grid-cols-4 gap-1">
+                    {[64, 128, 256].map(size => (
+                      <button
+                        key={size}
+                        onClick={() => setThumbnailSize(size)}
+                        className={cn(
+                          "py-1 rounded text-[9px] font-black border transition-all",
+                          thumbnailSize === size ? "bg-slate-800 border-slate-800 text-white" : "bg-slate-50 border-slate-200 text-slate-400"
+                        )}
+                      >
+                        {size}px
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setThumbnailSize(0)}
+                      className={cn(
+                        "py-1 rounded text-[9px] font-black border transition-all",
+                        thumbnailSize === 0 ? "bg-slate-800 border-slate-800 text-white" : "bg-slate-50 border-slate-200 text-slate-400"
+                      )}
+                    >
+                      Cust
+                    </button>
+                  </div>
+                  {thumbnailSize === 0 && (
+                    <div className="flex items-center gap-2 mt-1">
+                      <input 
+                        type="range"
+                        min="32"
+                        max="1024"
+                        step="32"
+                        value={customThumbnailSize}
+                        onChange={(e) => setCustomThumbnailSize(parseInt(e.target.value))}
+                        className="flex-1 h-1 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-slate-800"
+                      />
+                      <span className="text-[9px] font-mono text-slate-500 w-8">{customThumbnailSize}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {photos.length > 0 && (
                 <div className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded shadow-sm">
                   <div className="flex items-center gap-3">
@@ -575,13 +677,61 @@ function MapContent({
           </div>
 
           {rawData.length > 0 && (
-            <button 
-              onClick={() => { setRawData([]); setStartDate(''); setEndDate(''); setSelectedPoint(null); }}
-              className="mt-6 w-full py-2 flex items-center justify-center gap-2 text-slate-400 hover:text-red-500 transition-colors text-[10px] font-black uppercase tracking-widest border border-slate-100 hover:border-red-100 rounded bg-white hover:bg-red-50"
-            >
-              <Trash2 className="w-3 h-3" />
-              Reset All Data
-            </button>
+            <div className="mt-4 space-y-2">
+              <div className="flex items-center gap-2 mb-2 p-1 bg-white border border-slate-200 rounded text-[9px] font-black uppercase tracking-widest">
+                <span className="ml-2 text-slate-400">Format:</span>
+                <div className="flex-1 flex gap-1">
+                  {(['kml', 'kmz'] as const).map(f => (
+                    <button
+                      key={f}
+                      onClick={() => setExportFormat(f)}
+                      className={cn(
+                        "flex-1 py-1 rounded transition-all",
+                        exportFormat === f ? "bg-slate-800 text-white" : "text-slate-400 hover:bg-slate-50"
+                      )}
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <button 
+                onClick={async () => {
+                  let blob: Blob;
+                  let fileName: string;
+                  const timestampStr = format(new Date(), 'yyyyMMdd_HHmmss');
+
+                  if (exportFormat === 'kmz') {
+                    blob = await generateKMZ(filteredData, photos);
+                    fileName = `geo_timeline_${timestampStr}.kmz`;
+                  } else {
+                    const kml = await generateKML(filteredData, photos);
+                    blob = new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' });
+                    fileName = `geo_timeline_${timestampStr}.kml`;
+                  }
+
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = fileName;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+                className="w-full py-2.5 flex items-center justify-center gap-2 bg-slate-800 text-white hover:bg-slate-900 transition-all text-[10px] font-black uppercase tracking-widest rounded shadow-sm"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Export {exportFormat.toUpperCase()} (Filtered)
+              </button>
+              
+              <button 
+                onClick={() => { setRawData([]); setStartDate(''); setEndDate(''); setSelectedPoint(null); }}
+                className="w-full py-2 flex items-center justify-center gap-2 text-slate-400 hover:text-red-500 transition-colors text-[10px] font-black uppercase tracking-widest border border-slate-100 hover:border-red-100 rounded bg-white hover:bg-red-50"
+              >
+                <Trash2 className="w-3 h-3" />
+                Reset All Data
+              </button>
+            </div>
           ) }
         </section>
       </aside>
@@ -623,12 +773,20 @@ function MapContent({
           )}
 
           {photos.length > 0 && (
-            // @ts-ignore
-            <MarkerClusterGroup chunkedLoading={true}>
-              {photos.map((photo: PhotoItem) => (
-                <PhotoMarker key={photo.id} photo={photo} />
-              ))}
-            </MarkerClusterGroup>
+            clusterPhotos ? (
+              // @ts-ignore
+              <MarkerClusterGroup chunkedLoading={true}>
+                {displayedPhotos.map((photo: PhotoItem) => (
+                  <PhotoMarker key={photo.id} photo={photo} activeThumbSize={activeThumbSize} />
+                ))}
+              </MarkerClusterGroup>
+            ) : (
+              <>
+                {displayedPhotos.map((photo: PhotoItem) => (
+                  <PhotoMarker key={photo.id} photo={photo} activeThumbSize={activeThumbSize} />
+                ))}
+              </>
+            )
           )}
         </MapContainer>
 
@@ -745,6 +903,12 @@ export default function App() {
   const [photos, setPhotos] = useState<PhotoItem[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
 
+  const [clusterPhotos, setClusterPhotos] = useState(true);
+  const [thumbnailSize, setThumbnailSize] = useState<number>(128);
+  const [customThumbnailSize, setCustomThumbnailSize] = useState<number>(512);
+
+  const activeThumbSize = thumbnailSize === 0 ? customThumbnailSize : thumbnailSize;
+
   // Playback State
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -856,6 +1020,72 @@ export default function App() {
     ];
   }, [filteredData, currentTime]);
 
+  const generateThumbnail = useCallback((file: File, size: number): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = URL.createObjectURL(file);
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const MAX_SIZE = size;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_SIZE) {
+            height *= MAX_SIZE / width;
+            width = MAX_SIZE;
+          }
+        } else {
+          if (height > MAX_SIZE) {
+            width *= MAX_SIZE / height;
+            height = MAX_SIZE;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob((blob) => {
+          if (blob) {
+            resolve(URL.createObjectURL(blob));
+          } else {
+            resolve(URL.createObjectURL(file)); // Fallback
+          }
+        }, 'image/jpeg', 0.8);
+        
+        URL.revokeObjectURL(img.src);
+      };
+      img.onerror = () => {
+        resolve(URL.createObjectURL(file)); // Fallback on error
+      };
+    });
+  }, []);
+
+  // Thumbnail regeneration effect
+  useEffect(() => {
+    if (photos.length === 0) return;
+
+    const timer = setTimeout(async () => {
+      setIsSyncing(true);
+      const updatedPhotos = await Promise.all(photos.map(async (photo) => {
+        // Revoke old thumbnail URL
+        if (photo.thumbnailUrl) {
+          URL.revokeObjectURL(photo.thumbnailUrl);
+        }
+        
+        const newThumbUrl = await generateThumbnail(photo.file, activeThumbSize);
+        return { ...photo, thumbnailUrl: newThumbUrl };
+      }));
+      
+      setPhotos(updatedPhotos);
+      setIsSyncing(false);
+    }, 500); // Debounce for 500ms
+
+    return () => clearTimeout(timer);
+  }, [activeThumbSize, generateThumbnail]);
+
   const handlePhotoUpload = async (files: File[]) => {
     setIsSyncing(true);
     let successCount = 0;
@@ -873,9 +1103,11 @@ export default function App() {
         } as any);
 
         if (metadata && metadata.latitude && metadata.longitude) {
+          const thumbnailUrl = await generateThumbnail(file, activeThumbSize);
           const photo: PhotoItem = {
             id: `${file.name}-${file.lastModified}-${Math.random()}`,
             url: URL.createObjectURL(file),
+            thumbnailUrl,
             filename: file.name,
             creationTime: metadata.DateTimeOriginal?.toISOString() || metadata.CreateDate?.toISOString(),
             cameraModel: metadata.Model,
@@ -884,7 +1116,8 @@ export default function App() {
             location: {
               latitude: metadata.latitude,
               longitude: metadata.longitude
-            }
+            },
+            file
           };
           newPhotos.push(photo);
           successCount++;
@@ -1009,6 +1242,13 @@ export default function App() {
         vehicleType={vehicleType}
         setVehicleType={setVehicleType}
         currentPosition={currentPosition}
+        clusterPhotos={clusterPhotos}
+        setClusterPhotos={setClusterPhotos}
+        thumbnailSize={thumbnailSize}
+        setThumbnailSize={setThumbnailSize}
+        customThumbnailSize={customThumbnailSize}
+        setCustomThumbnailSize={setCustomThumbnailSize}
+        activeThumbSize={activeThumbSize}
       />
       <style>{`
         .custom-scrollbar::-webkit-scrollbar {
