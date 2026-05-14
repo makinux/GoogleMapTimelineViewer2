@@ -7,6 +7,7 @@ In 2024, Google announced that it would store timeline data (such as location hi
 If, like me, you want to view years' worth of timeline data, this project makes that possible.
 
 Note that since it uses OpenStreetMap as the base map instead of Google Maps, no API key is required and Serverless.
+Additionally, uploading a JPEG file with location information in its EXIF ​​data will allow you to plot the photo thumbnails on a map.
 
 DEMO:https://makinux.github.io/GoogleMapTimelineViewer2/
 
