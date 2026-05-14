@@ -1,6 +1,6 @@
 ## GoogleMapTimelineViewer
 
-<img width="1351" height="761" alt="image" src="https://github.com/user-attachments/assets/dff1182c-fb23-471c-aa8a-73b6a34cf4c6" />
+<img width="1264" height="900" alt="image" src="https://github.com/user-attachments/assets/934f8360-8142-41cb-ba08-6405503e499a" />
 
 In 2024, Google announced that it would store timeline data (such as location history) locally on the device itself, rather than in a cloud-based system. Because the data is now stored on the device, the desktop version of the timeline viewer was discontinued.
 
